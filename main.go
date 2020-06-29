@@ -1,27 +1,36 @@
 package main
 
 import (
-	"fmt"
-	"net/http"
-	"time"
+	"context"
+	"flag"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
-const (
-	ErrContentType = "Content-Type header is not application/json"
-	ErrPost        = "Method is not POST"
+var (
+	port int
 )
 
-const TimeoutMessage = "Your request has timed out\n"
+func init() {
+	flag.IntVar(&port, "port", 8080, "Specify the port to listen to")
+}
 
 func main() {
-	m := midlewareWrapper(http.HandlerFunc(InspectorHandler), 100)
-	srv := http.Server{
-		Addr:    ":8080",
-		Handler: http.TimeoutHandler(m, 10*time.Second, TimeoutMessage),
-	}
+	ctx, cancel := context.WithCancel(context.Background())
 
-	if err := srv.ListenAndServe(); err != nil {
-		fmt.Printf("Server failed: %s\n", err)
-	}
+	go func() { // catch signal and invoke graceful termination
+		stop := make(chan os.Signal, 1)
+		signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+		<-stop
+
+		log.Printf("[DEBUG] interrupt signal")
+		cancel()
+	}()
+
+	v := NewVisitor()
+	s := NewServer(port, 100, v)
+	s.Run(ctx)
 
 }
