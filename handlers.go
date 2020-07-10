@@ -72,10 +72,12 @@ func (s *Server) InspectorHandler(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	errc := make(chan error, 1)
 	res := make([]InspectorResponse, 0)
+	resultCh := make(chan InspectorResponse, 1)
 
 	defer func() {
 		res = nil
 		close(sema)
+		close(resultCh)
 		close(errc)
 	}()
 
@@ -91,9 +93,9 @@ func (s *Server) InspectorHandler(w http.ResponseWriter, r *http.Request) {
 	for i, _ := range d.Urls {
 		sema <- struct{}{}
 		wg.Add(1)
+
 		go func(wg *sync.WaitGroup, url string) {
 			defer func() {
-				wg.Done()
 				<-sema
 			}()
 
@@ -105,9 +107,18 @@ func (s *Server) InspectorHandler(w http.ResponseWriter, r *http.Request) {
 				break
 			default:
 			}
-			res = append(res, InspectorResponse{Url: url, Data: resp})
+
+			resultCh <- InspectorResponse{Url: url, Data: resp}
 		}(&wg, d.Urls[i])
 	}
+
+	go func(q <-chan InspectorResponse) {
+		for t := range resultCh {
+			res = append(res, t)
+			wg.Done()
+		}
+	}(resultCh)
+
 	wg.Wait()
 	if err != nil {
 		http.Error(w, ErrBadRequest, http.StatusBadRequest)
